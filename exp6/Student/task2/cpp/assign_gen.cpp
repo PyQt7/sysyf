@@ -37,6 +37,7 @@ int main(){
     auto bAlloca = builder->create_alloca(float_type);
     auto *arrayType_a = ArrayType::get(Int32Type, 2);
     auto aAlloca = builder->create_alloca(arrayType_a);
+    builder->create_store(CONST_INT(0), retAlloca);
     builder->create_store(CONST_FP(1.8), bAlloca);
     auto a0Gep = builder->create_gep(aAlloca, {CONST_INT(0), CONST_INT(0)});
     builder->create_store(CONST_INT(2), a0Gep);//a[0]=2

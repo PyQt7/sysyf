@@ -65,8 +65,7 @@ int main() {
 
   builder->create_store(args[0], nAlloca);  // store参数n
 
-  auto retBB = BasicBlock::create(
-      module, "", climbStairsFun);  // return分支,提前create,以便true分支可以br
+  auto retBB = BasicBlock::create(module, "retBB", climbStairsFun);  // return分支,提前create,以便true分支可以br
 
   auto nLoad = builder->create_load(nAlloca);           // 将参数n load上来
   auto icmp = builder->create_icmp_lt(nLoad, CONST_INT(4));  // n和4的比较,注意ICMPLT

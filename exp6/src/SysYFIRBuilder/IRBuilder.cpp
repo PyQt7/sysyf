@@ -3,6 +3,16 @@
 #define CONST_INT(num) ConstantInt::get(num, module.get())
 #define CONST_FLOAT(num) ConstantFloat::get(num, module.get())
 
+#define Binary_op(op,type,lhs_val,rhs_val) \
+    if((type)==INT32_T){\
+        tmp_val=builder->create_i##op((lhs_val),(rhs_val));\
+    }\
+    else{\
+        tmp_val=builder->create_f##op((lhs_val),(rhs_val));\
+    }
+
+#define create_idiv create_isdiv
+
 // You can define global variables and functions here
 // to store state
 
@@ -41,11 +51,42 @@ void IRBuilder::visit(SyntaxTree::FuncParam &node) {}
 
 void IRBuilder::visit(SyntaxTree::VarDef &node) {}
 
-void IRBuilder::visit(SyntaxTree::LVal &node) {}
+void IRBuilder::visit(SyntaxTree::LVal &node) {
+    auto lval=scope.find(node.name,false);
+    if(lval){
+        auto lval_type=lval->get_type();
 
-void IRBuilder::visit(SyntaxTree::AssignStmt &node) {}
+        if(!node.array_index.empty()){
+            for (auto index : node.array_index) {
+                index->accept(*this);
+                //todo ...=tmp_val 用一个vector记录多维数组的下标，现在只实现了一维
+            }
+            tmp_val=builder->create_gep(lval,{CONST_INT(0), tmp_val});
+        }
+        else{
+            tmp_val=lval;
+        }
 
-void IRBuilder::visit(SyntaxTree::Literal &node) {}
+    }
+    
+}
+
+void IRBuilder::visit(SyntaxTree::AssignStmt &node) {
+    node.target->accept(*this);
+    auto addr=tmp_val;
+    node.value->accept(*this);
+    auto val=tmp_val;
+    builder->create_store(val,addr);
+}
+
+void IRBuilder::visit(SyntaxTree::Literal &node) {
+    if(node.literal_type == SyntaxTree::Type::INT){
+        tmp_val=CONST_INT(node.int_const);
+    }
+    else{
+        tmp_val=CONST_FLOAT(node.float_const);
+    }
+}
 
 void IRBuilder::visit(SyntaxTree::ReturnStmt &node) {}
 
@@ -53,17 +94,77 @@ void IRBuilder::visit(SyntaxTree::BlockStmt &node) {}
 
 void IRBuilder::visit(SyntaxTree::EmptyStmt &node) {}
 
-void IRBuilder::visit(SyntaxTree::ExprStmt &node) {}
+void IRBuilder::visit(SyntaxTree::ExprStmt &node) {
+    node.exp->accept(*this);
+}
 
 void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {}
 
 void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {}
 
-void IRBuilder::visit(SyntaxTree::BinaryExpr &node) {}
+void IRBuilder::visit(SyntaxTree::BinaryExpr &node) {
+    node.lhs->accept(*this);
+    auto lhs_val = tmp_val;
+    auto lhs_type = tmp_val->get_type();
+    node.rhs->accept(*this);
+    auto rhs_val = tmp_val;
+    auto rhs_type = tmp_val->get_type();
 
-void IRBuilder::visit(SyntaxTree::UnaryExpr &node) {}
+    auto expr_type=FLOAT_T;
+    if(lhs_type==FLOAT_T && !(rhs_type==FLOAT_T)){
+        rhs_val=builder->create_sitofp(rhs_val,FLOAT_T);
+    }
+    else if(!(lhs_type==FLOAT_T) && rhs_type==FLOAT_T){
+        lhs_val=builder->create_sitofp(lhs_val,FLOAT_T);
+    }
+    else if(lhs_type==INT32_T && rhs_type==INT32_T){
+        expr_type=INT32_T;
+    }
+    
+    
+    switch(node.op){
+        case SyntaxTree::BinOp::PLUS:
+            Binary_op(add,expr_type,lhs_val,rhs_val)
+            break;
+        case SyntaxTree::BinOp::MINUS:
+            Binary_op(sub,expr_type,lhs_val,rhs_val)
+        break;
+        case SyntaxTree::BinOp::MULTIPLY:
+            Binary_op(mul,expr_type,lhs_val,rhs_val)
+        break;
+        case SyntaxTree::BinOp::DIVIDE:
+            Binary_op(div,expr_type,lhs_val,rhs_val)
+        break;
+        case SyntaxTree::BinOp::MODULO:
+            tmp_val=builder->create_isrem(lhs_val,rhs_val);//不检查取模类型
+            break;
+    }
 
-void IRBuilder::visit(SyntaxTree::FuncCallStmt &node) {}
+}
+
+void IRBuilder::visit(SyntaxTree::UnaryExpr &node) {
+    node.rhs->accept(*this);
+    if(node.op==SyntaxTree::UnaryOp::MINUS){
+        if(tmp_val->get_type()==INT32_T){
+            tmp_val=builder->create_isub(CONST_INT(0),tmp_val);
+        }
+        else{
+            tmp_val=builder->create_fsub(CONST_FLOAT(0),tmp_val);
+        }
+    }
+}
+
+void IRBuilder::visit(SyntaxTree::FuncCallStmt &node) {
+    auto func=scope.find(node.name,true);
+    if(func){
+        std::vector<Value *> args{};
+        for(auto exp:node.params){
+            exp->accept(*this);
+            args.push_back(tmp_val);
+        }
+        tmp_val=builder->create_call(func,args);
+    }
+}
 
 void IRBuilder::visit(SyntaxTree::IfStmt &node) {}
 
