@@ -1,6 +1,6 @@
 # PW6 实验报告
 
-学号1 姓名1 学号2 姓名2 学号3 姓名3
+学号1 姓名1 学号2 姓名2 学号3 姓名3 (不要上传到外网)
 
 ## 问题回答
 
@@ -54,6 +54,11 @@ while(i<n+1){
   %10 = add nsw i32 %8, %9
   %11 = call i32 @climbStairs(i32 %10)
 ```
+
+2-1. 请给出SysYFIR.md中提到的两种getelementptr用法的区别, 并解释原因:
+
+%2 = getelementptr [10 x i32], [10 x i32]* %1, i32 0, i32 %0
+%2 = getelementptr i32, i32* %1, i32 %0
 
 ## 实验设计
 

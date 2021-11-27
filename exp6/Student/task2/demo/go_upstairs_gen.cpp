@@ -18,7 +18,7 @@
     ConstantInt::get(num, module)
 
 #define CONST_FP(num) \
-    ConstantFP::get(num, module) // 得到常数值的表示,方便后面多次用到
+    ConstantFloat::get(num, module) // 得到常数值的表示,方便后面多次用到
 
 int main() {
   auto module = new Module("SysY code");  // module name是什么无关紧要

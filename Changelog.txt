@@ -1,7 +1,13 @@
 
+exp6
+
 20211126
 1。对SysYFIR.md做了一定修改，包括写错的地方、说得不够清楚的地方、内容要点顺序不一致的地方。SysYFIR.md中出现了cminus，似乎是从隔壁班抄来的？
 2。task1的ll文件编写
 3。填写task1的思考题
+
+20211127
+1。修复原本给出的demo中的错误(ConstantFloat写错了)
+2。完成task2的assign
 
 
