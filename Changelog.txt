@@ -10,4 +10,5 @@ exp6
 1。修复原本给出的demo中的错误(ConstantFloat写错了)
 2。完成task2的assign
 
-
+20211127
+1。完成task2的func
