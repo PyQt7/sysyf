@@ -4,6 +4,57 @@
 
 ## 问题回答
 
+1-1 请给出while语句对应的LLVM IR的代码布局特点，重点解释其中涉及的几个`br`指令的含义（包含各个参数的含义）
+
+while布局特点：
+
+while的条件为一个基本块，后面附带两个基本块，第一个是循环体，第二个是循环后面的部分。
+
+例如
+
+```c++
+while(i<n+1){
+    // dp[i] = dp[i-1] + dp[i-2];
+    i = i + 1;
+}
+```
+
+对应的是
+
+```c
+14:                                               ; preds = %19, %10
+  %15 = load i32, i32* %5, align 4;i
+  %16 = load i32, i32* %3, align 4;n
+  %17 = add nsw i32 %16, 1;n+1
+  %18 = icmp slt i32 %15, %17;i<n+1
+  br i1 %18, label %19, label %36;true 跳转到 %19, false 跳转到 %36
+
+19:                                               ; preds = %14
+  ...;省略无关部分
+  %34 = load i32, i32* %5, align 4;i
+  %35 = add nsw i32 %34, 1;i+1
+  store i32 %35, i32* %5, align 4;i=i+1
+  br label %14, !llvm.loop !3;继续下一次循环条件判断
+
+36:                                               ; preds = %14
+
+```
+
+1-2 请简述函数调用语句对应的LLVM IR的代码特点
+
+函数调用代码特点：
+
+先把参数都加载到寄存器，再`call <类型> @函数名(参数列表)`。
+
+例如`climbStairs(n + tmp)` 对应的是
+
+```c
+  %8 = load i32, i32* @n, align 4
+  %9 = load i32, i32* @tmp, align 4
+  %10 = add nsw i32 %8, %9
+  %11 = call i32 @climbStairs(i32 %10)
+```
+
 ## 实验设计
 
 ## 实验难点及解决方案

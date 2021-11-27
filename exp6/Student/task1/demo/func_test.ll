@@ -5,9 +5,15 @@ target triple = "x86_64-w64-windows-gnu"
 
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @add(i32 %0, i32 %1) #0 {
-  %3 = add nsw i32 %0, %1
-  %4 = sub nsw i32 %3, 1
-  ret i32 %4
+  %3 = alloca i32, align 4
+  %4 = alloca i32, align 4
+  store i32 %0, i32* %3, align 4
+  store i32 %1, i32* %4, align 4
+  %5 = load i32, i32* %3, align 4
+  %6 = load i32, i32* %4, align 4
+  %7 = add nsw i32 %5, %6
+  %8 = sub nsw i32 %7, 1
+  ret i32 %8
 }
 
 ; Function Attrs: noinline nounwind optnone uwtable
@@ -35,4 +41,4 @@ attributes #0 = { noinline nounwind optnone uwtable "disable-tail-calls"="false"
 
 !0 = !{i32 1, !"wchar_size", i32 2}
 !1 = !{i32 7, !"PIC Level", i32 2}
-!2 = !{!"clang version 12.0.0"}
+!2 = !{!"(built by Brecht Sanders) clang version 12.0.0"}

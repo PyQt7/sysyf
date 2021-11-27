@@ -3,8 +3,8 @@ source_filename = "while_test.c"
 target datalayout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-w64-windows-gnu"
 
-@a = dso_local global i32 0, align 4
 @b = dso_local global i32 0, align 4
+@a = dso_local global i32 0, align 4
 
 ; Function Attrs: noinline nounwind optnone uwtable
 define dso_local i32 @main() #0 {
@@ -27,7 +27,7 @@ define dso_local i32 @main() #0 {
   %9 = load i32, i32* @a, align 4
   %10 = sub nsw i32 %9, 1
   store i32 %10, i32* @a, align 4
-  br label %2
+  br label %2, !llvm.loop !3
 
 11:                                               ; preds = %2
   %12 = load i32, i32* @b, align 4
@@ -41,4 +41,6 @@ attributes #0 = { noinline nounwind optnone uwtable "disable-tail-calls"="false"
 
 !0 = !{i32 1, !"wchar_size", i32 2}
 !1 = !{i32 7, !"PIC Level", i32 2}
-!2 = !{!"clang version 12.0.0"}
+!2 = !{!"(built by Brecht Sanders) clang version 12.0.0"}
+!3 = distinct !{!3, !4}
+!4 = !{!"llvm.loop.mustprogress"}

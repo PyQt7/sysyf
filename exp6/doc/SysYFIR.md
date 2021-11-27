@@ -146,7 +146,7 @@
       %11 = add nsw i32 %9, %10
       ret i32 %11  
     ```
-    这个例子中，`8`就是Label。  
+    这个例子中，`8`就是Label。`preds = %7, %0`表示之前的label中能跳转到这里的块，`%0`是最上面的基本块，没有显式写出，其后往往有个`%1`来保存默认返回值(如果有)。如果函数有2个参数`%0`和`%1`，则最上面的基本块将变成`%2`。`%`开头的符号表示基本块或寄存器。  
     `%9 = load i32, i32* %2, align 4`中的`%9`是目的操作数，`load`是指令助记符，`i32`是`int32`的类型，`i32*`是指向`int32`的地址类型，`%2`是源操作数，`align 4`表示对齐。
 ### Instruction
 #### Terminator Instructions
@@ -165,7 +165,7 @@
   - `br i1 <cond>, label <iftrue>, label <iffalse>`
   - `br label <dest>`
 - 例子：
-  - `br i1 %cond label %truebb label %falsebb`
+  - `br i1 %cond, label %truebb, label %falsebb`
   - `br label %bb`
 - 概念：`br`指令用于使控制流转移到当前功能中的另一个基本块。 该指令有两种形式，分别对应于条件分支和无条件分支。
     
@@ -217,17 +217,17 @@
 ##### ZExt    
 - 格式：`<result> = zext <type> <value> to <type2>`
 - 例子：`%1 = zext i1 %0 to i32`
-- 概念：`zext`指令将其操作数**零**扩展为`type2`类型。
+- 概念：`zext`指令将其操作数**零**扩展为`type2`类型。Zero extend
 
 ##### FpToSi
-- 概念：`fptosi`指令将浮点值转换为`type2`（整数）类型。
 - 格式：`<result> = fptosi <type> <value> to <type2>`
 - 例子：`%Y = fptosi float 1.0E-247 to i32`
+- 概念：`fptosi`指令将浮点值转换为`type2`（有符号整数）类型。Float point to signed int
 
 ##### SiToFp
 - 格式：`<result> = sitofp <type> <value> to <type2>`
 - 例子：`%X = sitofp i32 257 to float`
-- 概念：`sitofp`指令将有符号整数转换为`type2`（浮点数）类型。
+- 概念：`sitofp`指令将有符号整数转换为`type2`（浮点数）类型。Signed int to float point
 
 #### Other operators
 ##### ICmp FCmp
@@ -237,21 +237,21 @@
   - `<result> = fcmp <cond> <type> <op1>, <op2>`
     - `<cond> = eq | ne | ugt | uge | ult | ule`
 - 例子：`i1 %2 = icmp sge i32 %0, %1`
-- 概念：`icmp`指令根据两个整数的比较返回布尔值，`fcmp`指令根据两个浮点数的比较返回布尔值。
+- 概念：`icmp`指令根据两个整数的比较返回布尔值，`fcmp`指令根据两个浮点数的比较返回布尔值。i=int,f=float,s=signed,u=unsigned
 
 ##### Call
 - 格式：
   - `<result> = call <return ty> <func name>(<function args>) `
 - 例子：
-  - `%0 = call i32 @func( i32 %1, i32* %0)`
-  - `call @func( i32 %arg)`
+  - `%0 = call i32 @func(i32 %1, i32* %0)`
+  - `call @func(i32 %arg)`
 - 概念：`call`指令用于使控制流转移到指定的函数，其传入参数绑定到指定的值。 在被调用函数中执行`ret`指令后，控制流程将在函数调用后继续执行该指令，并且该函数的返回值绑定到`result`参数。
 
 ##### GetElementPtr
 - 格式：`<result> = getelementptr <type>, <type>* <ptrval> [, <type> <idx>]`
 - 例子：
-  - `%2 = getelementptr [10 x i32], [10 x i32]* %1, i32 0, i32 %0` 
-  - `%2 = getelementptr i32, i32* %1 i32 %0` 
+  - `%2 = getelementptr [10 x i32], [10 x i32]* %1, i32 0, i32 %0; 0是起始下标,%0是下标` 
+  - `%2 = getelementptr i32, i32* %1, i32 %0; %0是下标,只有一项时默认下标从0开始` 
 - 参数解释：第一个参数是计算基础类型，第二第三个参数表示索引开始的指针类型及指针，`[]`表示可重复参数，里面表示的数组索引的偏移类型及偏移值。（思考指针类型为`[10 x i32]`指针和`i32`指针`getelementptr`用法的不同）
 - 概念：`getelementptr`指令用于获取数组结构的元素的地址。 它仅执行地址计算，并且不访问内存。
 
