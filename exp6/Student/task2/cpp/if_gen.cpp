@@ -40,17 +40,18 @@ int main(){
     builder->create_store(CONST_INT(0), retAlloca);
     builder->create_store(CONST_INT(10), a);
 
-    auto retBB = BasicBlock::create(module, "retBB", mainFun);  // return分支,提前create,以便true分支可以br
-
     auto trueBB = BasicBlock::create(module, "trueBB_if", mainFun);    // true分支
     auto falseBB = BasicBlock::create(module, "falseBB_if", mainFun);  // false分支
+    
+    auto retBB = BasicBlock::create(module, "retBB", mainFun);  // return分支,提前create,以便false分支可以br
 
-    auto icmp = builder->create_icmp_gt(a, CONST_INT(0));  // a>0
+    auto aLoad = builder->create_load(a);
+    auto icmp = builder->create_icmp_gt(aLoad, CONST_INT(0));  // a>0
 
     builder->create_cond_br(icmp, trueBB, falseBB);  // 条件BR
 
     builder->set_insert_point(trueBB);  // if true; 分支的开始需要SetInsertPoint设置
-    builder->create_ret(a);  // return a
+    builder->create_ret(aLoad);  // return a
 
     builder->set_insert_point(falseBB);  // if false
     builder->create_br(retBB);  // br retBB
@@ -58,5 +59,7 @@ int main(){
     builder->set_insert_point(retBB);  // ret分支
     builder->create_ret(CONST_INT(0));  // return 0
 
+    std::cout << module->print();
+    delete module;
     return 0;
 }

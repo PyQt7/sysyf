@@ -51,5 +51,7 @@ int main(){
     auto a1Load = builder->create_load(a1Gep);
     builder->create_ret(a1Load);//return a[1]
 
+    std::cout << module->print();
+    delete module;
     return 0;
 }

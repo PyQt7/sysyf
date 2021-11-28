@@ -42,27 +42,36 @@ int main(){
     builder->create_store(CONST_INT(0), b);
     builder->create_store(CONST_INT(3), a);
 
-    auto retBB = BasicBlock::create(module, "retBB", mainFun);  // return分支,提前create,以便true分支可以br
-
     auto condBB = BasicBlock::create(module, "condBB_while", mainFun);  // 条件BB
     auto trueBB = BasicBlock::create(module, "trueBB_while", mainFun);    // true分支
     auto falseBB = BasicBlock::create(module, "falseBB_while", mainFun);  // false分支
 
+    auto retBB = BasicBlock::create(module, "retBB", mainFun);  // return分支,提前create,以便false分支可以br
+
+    builder->create_br(condBB);
+
     builder->set_insert_point(condBB);  // while
-    auto icmp = builder->create_icmp_gt(a, CONST_INT(0));  // a>0
+    auto aLoad = builder->create_load(a);
+    auto icmp = builder->create_icmp_gt(aLoad, CONST_INT(0));  // a>0
 
     builder->create_cond_br(icmp, trueBB, falseBB);  // 条件BR
 
     builder->set_insert_point(trueBB);  // if true; 分支的开始需要SetInsertPoint设置
-    auto b_a=builder->create_iadd(b,a); //b+a
-    builder->create_store(b_a,a); //a=b+a
+    auto bLoad = builder->create_load(b);
+    auto b_add_a=builder->create_iadd(bLoad,aLoad); //b+a
+    builder->create_store(b_add_a,b); //b=b+a
+    auto a_sub_1=builder->create_isub(aLoad,CONST_INT(1)); //a-1
+    builder->create_store(a_sub_1,a); //a=a-1
     builder->create_br(condBB);
 
     builder->set_insert_point(falseBB);  // if false
     builder->create_br(retBB);  // br retBB
 
     builder->set_insert_point(retBB);  // ret分支
-    builder->create_ret(b);  // return b
+    bLoad = builder->create_load(b);
+    builder->create_ret(bLoad);  // return b
 
+    std::cout << module->print();
+    delete module;
     return 0;
 }
