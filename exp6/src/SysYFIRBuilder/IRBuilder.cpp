@@ -23,8 +23,10 @@
 
 // store temporary value
 Value *tmp_val = nullptr;
-std::vector<BasicBlock*> tmp_condbb;
-std::vector<BasicBlock *> tmp_falsebb;
+std::vector<BasicBlock*> tmp_condbb_while;
+std::vector<BasicBlock *> tmp_falsebb_while;
+BasicBlock *tmp_falsebb;
+bool break_or_continue;
 
 // types
 Type *VOID_T;
@@ -114,10 +116,10 @@ void IRBuilder::visit(SyntaxTree::ReturnStmt &node) {
 }
 
 void IRBuilder::visit(SyntaxTree::BlockStmt &node) {
-    this->scope.enter();
+     this->scope.enter();
     for(auto stmt : node.body){
         stmt->accept(*this);
-        if(dynamic_cast<SyntaxTree::BreakStmt*>(stmt.get())!=nullptr||dynamic_cast<SyntaxTree::ContinueStmt*>(stmt.get())!=nullptr){
+        if(break_or_continue=true){
             break;
         }
     }
@@ -290,8 +292,9 @@ void IRBuilder::visit(SyntaxTree::FuncCallStmt &node) {
 }
 
 void IRBuilder::visit(SyntaxTree::IfStmt &node) {
-    auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_if", this->builder->get_module()->get_functions().back());
+   auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_if", this->builder->get_module()->get_functions().back());
     auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_if", this->builder->get_module()->get_functions().back());
+    tmp_falsebb = falseBB;
     node.cond_exp->accept(*this);
     this->builder->create_cond_br(tmp_val, trueBB, falseBB);
     this->builder->set_insert_point(trueBB);
@@ -308,22 +311,27 @@ void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
     auto falseBB=BasicBlock::create(this->builder->get_module(),"condBB_while",this->builder->get_module()->get_functions().back());
     this->builder->create_br(condBB);
     this->builder->set_insert_point(condBB);
+    tmp_falsebb = condBB;
     node.cond_exp->accept(*this);
     this->builder->create_cond_br(tmp_val, trueBB, falseBB);
     this->builder->set_insert_point(trueBB);
-    tmp_condbb.push_back(condBB);
-    tmp_falsebb.push_back(falseBB);
+    tmp_condbb_while.push_back(condBB);
+    tmp_falsebb_while.push_back(falseBB);
+    break_or_continue = false;
     node.statement->accept(*this);
     this->builder->create_br(condBB);
     this->builder->set_insert_point(falseBB);
+    tmp_condbb_while.pop_back();
+    tmp_falsebb_while.pop_back();
+    break_or_continue = false;
 }
 
 void IRBuilder::visit(SyntaxTree::BreakStmt &node) {
-    this->builder->create_br(tmp_falsebb.back());
-    tmp_falsebb.pop_back();
+    this->builder->create_br(tmp_falsebb_while.back());
+    break_or_continue = true;
 }
 
 void IRBuilder::visit(SyntaxTree::ContinueStmt &node) {
-    this->builder->create_br(tmp_condbb.back());
-    tmp_condbb.pop_back();
+    this->builder->create_br(tmp_condbb_while.back());
+    break_or_continue = true;
 }
