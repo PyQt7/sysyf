@@ -27,9 +27,19 @@
 #define create_idiv create_isdiv
 
 #define Init_func_name "__cxx_global_var_init"
+#define MAX_ARRAY_LENGTH 1024
 
 // You can define global variables and functions here
 // to store state
+
+#define ENABLE_GLOBAL_LITERAL
+
+#ifdef ENABLE_GLOBAL_LITERAL
+//用字面值初始化的全局常量(不含数组)符号表，与scope里定义的符号表不同的是：保存的不是地址而是常量值，用字面值初始化的全局常量不再加入scope的符号表
+//即把 用字面值初始化的全局常量 当成字面值使用，不再出现在.ll文件中
+//注意，用变量值初始化的全局常量应该当成全局变量，不能当成字面值；全局常量数组由于可能被变量下标引用，也不能当成字面值
+std::map<std::string, Constant *> global_literals;
+#endif
 
 // store temporary value
 Value *tmp_val = nullptr;
@@ -95,7 +105,13 @@ void store_to_address(Value *val, Value *addr, IRStmtBuilder *builder){
     builder->create_store(val,addr);
 }
 
+//ConstantInt和ConstantFloat实际是"字面值"，不是简单意义上的"常量"
+bool is_literal(Value *val){
+    return dynamic_cast<ConstantInt *>(val) || dynamic_cast<ConstantFloat *>(val);
+}
+
 //假设已经通过了语法分析和语义检查，测试样例没有错误
+//========== visit start ==========
 
 void IRBuilder::visit(SyntaxTree::Assembly &node) {
     VOID_T = Type::get_void_type(module.get());
@@ -119,6 +135,9 @@ void IRBuilder::visit(SyntaxTree::Assembly &node) {
         builder->set_insert_point(bb);//每次重置插入点为全局变量初始化函数，如果下面是函数定义则会被覆盖，没有问题
         def->accept(*this);
     }
+
+    builder->set_insert_point(bb);
+    builder->create_void_ret();
 }
 
 // You need to fill them
@@ -128,13 +147,12 @@ void IRBuilder::visit(SyntaxTree::InitVal &node) {
     if (node.isExp) {
         node.expr->accept(*this);
         LVal_to_RVal(tmp_val)
+        init_val.push_back(tmp_val);//支持多维数组，最终init_val是线性的(相当于展平了)
     }
     else {
         for (auto element : node.elementList) {
             element->accept(*this);
-            //todo 多维要记录tmp_val
         }
-        init_val.push_back(tmp_val);//todo 假设是一维数组
     }
 }
 
@@ -155,7 +173,7 @@ void IRBuilder::visit(SyntaxTree::FuncDef &node) {
     node.param_list->accept(*this);
 
     if(node.name=="main"){
-        if(init_func){
+        if(init_func){//调用初始化函数
             builder->create_call(init_func, std::vector<Value *> {});
         }
     }
@@ -197,11 +215,24 @@ void IRBuilder::visit(SyntaxTree::FuncParam &node) {
 
 void IRBuilder::visit(SyntaxTree::VarDef &node) {
     bool is_array = false;
-    std::vector<int>array_dim_len{};
+    std::vector<int> array_dim_len{};// 此处支持多维数组
     for (auto length : node.array_length) {
         length->accept(*this);
         is_array = true;
-        array_dim_len.push_back(dynamic_cast<ConstantInt *>(tmp_val)->get_value());//假设数组长度能在编译期确定(即是ConstantInt) 记录tmp_val(每一维的length) 以实现多维数组
+
+        auto const_int_val=dynamic_cast<ConstantInt *>(tmp_val);
+        auto const_float_val=dynamic_cast<ConstantFloat *>(tmp_val);
+        //假设数组长度能在编译期确定(即是ConstantInt或ConstantFloat)
+        if(const_int_val){
+            array_dim_len.push_back(const_int_val->get_value());
+        }
+        else if(const_float_val){
+            array_dim_len.push_back(static_cast<int>(const_float_val->get_value()));
+        }
+        else{//如果不能在编译期确定，简单实现就是用一个较大的数代替(实际汇编实现是用栈顶指针esp在运行时直接减去要分配的空间字节数)
+            array_dim_len.push_back(MAX_ARRAY_LENGTH);
+        }
+        
     }
 
     Value *new_alloca;
@@ -210,7 +241,6 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
     if(scope.in_global()){
         //全局变量(常量)无论有没有初始化，一律全部初始化为0，再调用初始化函数，这是clang++的做法。clang对局部变量也是先全部分配好空间再逐个初始化的。
         if(is_array){
-            // auto *arrayType = ArrayType::get(type_map[node.btype], dynamic_cast<SyntaxTree::Literal *>(node.array_length.front().get())->int_const);//todo front只实现了一维
             auto *arrayType = ArrayType::get(type_map[node.btype], array_dim_len.front());//todo front只实现了一维
             
             auto array_initializer = ConstantArray::get(arrayType, std::vector<Constant *>(arrayType->get_num_of_elements(),ConstantZero::get(type_map[node.btype], builder->get_module())));
@@ -220,11 +250,11 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
                 init_val.clear();//先清空
                 node.initializers->accept(*this);
 
-                //其实因为全局数组已经全部初始化为0，这里也可以省略这个循环
-                //隐式初始化{}中的0，直到init_val.size() == arrayType->get_num_of_elements()
-                while (init_val.size() < arrayType->get_num_of_elements()){
-                    init_val.push_back(ConstantZero::get(type_map[node.btype], builder->get_module()));
-                }
+                // //其实因为全局数组已经全部初始化为0，这里也可以省略这个循环
+                // //隐式初始化{}中的0，直到init_val.size() == arrayType->get_num_of_elements()
+                // while (init_val.size() < arrayType->get_num_of_elements()){
+                //     init_val.push_back(ConstantZero::get(type_map[node.btype], builder->get_module()));
+                // }
 
                 for(int i=0;i<init_val.size();++i){//初始化
                     auto iGep = builder->create_gep(new_alloca, {CONST_INT(0), CONST_INT(i)});
@@ -234,6 +264,29 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
         
         }
         else{//不是数组
+
+#ifdef ENABLE_GLOBAL_LITERAL
+            if(node.is_constant){//全局常量不是数组，必有初始化
+                if(node.initializers){
+                    auto literal_init=dynamic_cast<SyntaxTree::Literal *>(node.initializers->expr.get());
+
+                    if(literal_init){//用字面值初始化的全局常量不再加入scope的符号表
+                        if(literal_init->literal_type==SyntaxTree::Type::INT){
+                            global_literals[node.name]=CONST_INT(literal_init->int_const);
+                        }
+                        else{
+                            global_literals[node.name]=CONST_FLOAT(literal_init->float_const);
+                        }
+                        return;
+                    }
+
+                }
+                else{
+                    std::cout<<"global const without an initialization"<<std::endl;
+                }
+            }
+#endif
+
             auto zero_initializer = ConstantZero::get(type_map[node.btype], builder->get_module());
             new_alloca = GlobalVariable::create(node.name, builder->get_module(), type_map[node.btype], false, zero_initializer);
             
@@ -246,7 +299,6 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
     }
     else{//不是全局变量
         if(is_array){
-            // auto *arrayType = ArrayType::get(type_map[node.btype], dynamic_cast<SyntaxTree::Literal *>(node.array_length.front().get())->int_const);//假设数组长度能在编译期确定 todo front只实现了一维
             auto *arrayType = ArrayType::get(type_map[node.btype], array_dim_len.front());//todo front只实现了一维
             
             new_alloca = builder->create_alloca(arrayType);
@@ -278,12 +330,21 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
         }
     }
 
-    scope.push(node.name,new_alloca);//符号表中保存的全是指针类型
+    scope.push(node.name,new_alloca);//符号表中保存的全是指针类型(地址)
 
 }
 
 //返回的tmp_val是左值(地址)，用到值时要转为右值(用load指令)
+//数组下标必须是整数，不能是浮点数
 void IRBuilder::visit(SyntaxTree::LVal &node) {
+#ifdef ENABLE_GLOBAL_LITERAL
+    auto literal_val_iter=global_literals.find(node.name);
+    if(literal_val_iter!=global_literals.end()){
+        tmp_val=literal_val_iter->second;
+        return;
+    }
+#endif
+
     auto lval=scope.find(node.name,false);//符号表中保存的全是指针类型
     if(lval){
         if(lval->get_type()->is_pointer_type()==false){
@@ -332,12 +393,12 @@ void IRBuilder::visit(SyntaxTree::ReturnStmt &node) {
     if(node.ret!=nullptr){
         node.ret->accept(*this);
         LVal_to_RVal(tmp_val)
-        //返回值不是字面常量，不用考虑字面转型
-        if(builder->get_module()->get_functions().back()->get_function_type()->get_return_type()==INT32_T && tmp_val->get_type()!=INT32_T){
-            tmp_val=builder->create_fptosi(tmp_val,INT32_T);
+        auto return_type=builder->get_module()->get_functions().back()->get_function_type()->get_return_type();
+        if(return_type==INT32_T && tmp_val->get_type()!=INT32_T){
+            tmp_val=static_cast_value(tmp_val,INT32_T,builder);
         }
-        else if(builder->get_module()->get_functions().back()->get_function_type()->get_return_type()!=INT32_T && tmp_val->get_type()==INT32_T){
-            tmp_val=builder->create_sitofp(tmp_val,FLOAT_T);
+        else if(return_type!=INT32_T && tmp_val->get_type()==INT32_T){
+            tmp_val=static_cast_value(tmp_val,FLOAT_T,builder);
         }
         this->builder->create_ret(tmp_val);
     }
@@ -363,7 +424,46 @@ void IRBuilder::visit(SyntaxTree::ExprStmt &node) {
     node.exp->accept(*this);
 }
 
-void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {}
+//操作数是i32或float
+//非0得0，0得1
+void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {
+    node.rhs->accept(*this);
+    LVal_to_RVal(tmp_val)
+
+#ifdef ENABLE_GLOBAL_LITERAL
+    if(is_literal(tmp_val)){//简单字面量计算
+        int rhs_int;
+        float rhs_float;
+        if(tmp_val->get_type()==INT32_T){
+            rhs_int=dynamic_cast<ConstantInt *>(tmp_val)->get_value();
+        }
+        else{
+            rhs_float=dynamic_cast<ConstantFloat *>(tmp_val)->get_value();
+        }
+
+        if(node.op==SyntaxTree::UnaryCondOp::NOT){
+            if(tmp_val->get_type()==INT32_T){
+                tmp_val=CONST_INT(!rhs_int);
+            }
+            else{
+                tmp_val=CONST_FLOAT(!rhs_float);
+            }
+        }
+        return;
+    }
+#endif
+
+    if(node.op==SyntaxTree::UnaryCondOp::NOT){
+        if(tmp_val->get_type()==INT32_T){
+            tmp_val = builder->create_icmp_eq(tmp_val,CONST_INT(0));
+            tmp_val = builder->create_zext(tmp_val,INT32_T);
+        }
+        else{
+            tmp_val = builder->create_fcmp_eq(tmp_val,CONST_FLOAT(0));
+            tmp_val = builder->create_zext(tmp_val,INT32_T);
+        }
+    }
+}
 
 void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
     Value *lval, *rval;
@@ -465,7 +565,62 @@ void IRBuilder::visit(SyntaxTree::BinaryExpr &node) {
     else if(lhs_type==INT32_T && rhs_type==INT32_T){
         expr_type=INT32_T;
     }
-    
+
+#ifdef ENABLE_GLOBAL_LITERAL
+    if(is_literal(lhs_val)&&is_literal(rhs_val)){//简单字面量计算
+        int lhs_int;
+        int rhs_int;
+        float lhs_float;
+        float rhs_float;
+        if(expr_type==INT32_T){
+            lhs_int=dynamic_cast<ConstantInt *>(lhs_val)->get_value();
+            rhs_int=dynamic_cast<ConstantInt *>(rhs_val)->get_value();
+        }
+        else{
+            lhs_float=dynamic_cast<ConstantFloat *>(lhs_val)->get_value();
+            rhs_float=dynamic_cast<ConstantFloat *>(rhs_val)->get_value();
+        }
+
+        switch(node.op){
+            case SyntaxTree::BinOp::PLUS:
+                if(expr_type==INT32_T){
+                    tmp_val=CONST_INT(lhs_int+rhs_int);
+                }
+                else{
+                    tmp_val=CONST_FLOAT(lhs_float+rhs_float);
+                }
+                break;
+            case SyntaxTree::BinOp::MINUS:
+                if(expr_type==INT32_T){
+                    tmp_val=CONST_INT(lhs_int-rhs_int);
+                }
+                else{
+                    tmp_val=CONST_FLOAT(lhs_float-rhs_float);
+                }
+                break;
+            case SyntaxTree::BinOp::MULTIPLY:
+                if(expr_type==INT32_T){
+                    tmp_val=CONST_INT(lhs_int*rhs_int);
+                }
+                else{
+                    tmp_val=CONST_FLOAT(lhs_float*rhs_float);
+                }
+                break;
+            case SyntaxTree::BinOp::DIVIDE:
+                if(expr_type==INT32_T){
+                    tmp_val=CONST_INT(lhs_int/rhs_int);
+                }
+                else{
+                    tmp_val=CONST_FLOAT(lhs_float/rhs_float);
+                }
+                break;
+            case SyntaxTree::BinOp::MODULO:
+                tmp_val=CONST_INT(lhs_int%rhs_int);//不检查取模类型
+                break;
+        }
+        return;
+    }
+#endif    
     
     switch(node.op){
         case SyntaxTree::BinOp::PLUS:
@@ -490,6 +645,29 @@ void IRBuilder::visit(SyntaxTree::BinaryExpr &node) {
 void IRBuilder::visit(SyntaxTree::UnaryExpr &node) {
     node.rhs->accept(*this);
     LVal_to_RVal(tmp_val)
+
+#ifdef ENABLE_GLOBAL_LITERAL
+    if(is_literal(tmp_val)){//简单字面量计算
+        int rhs_int;
+        float rhs_float;
+        if(tmp_val->get_type()==INT32_T){
+            rhs_int=dynamic_cast<ConstantInt *>(tmp_val)->get_value();
+        }
+        else{
+            rhs_float=dynamic_cast<ConstantFloat *>(tmp_val)->get_value();
+        }
+
+        if(node.op==SyntaxTree::UnaryOp::MINUS){
+            if(tmp_val->get_type()==INT32_T){
+                tmp_val=CONST_INT(-rhs_int);
+            }
+            else{
+                tmp_val=CONST_FLOAT(-rhs_float);
+            }
+        }
+        return;
+    }
+#endif
 
     if(node.op==SyntaxTree::UnaryOp::MINUS){
         if(tmp_val->get_type()==INT32_T){
