@@ -394,7 +394,7 @@ void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
         node.lhs->accept(*this);
         lval = tmp_val;
         LVal_to_RVal(lval);
-        auto falseBB = BasicBlock::create(this->builder->get_module(), "trueBB_lhs", this->builder->get_module()->get_functions().back());
+        auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_lhs", this->builder->get_module()->get_functions().back());
         auto trueBB = tmp_truebb;
         if (lval->get_type() == INT1_T){
             this->builder->create_cond_br(lval, trueBB, falseBB);
@@ -578,6 +578,7 @@ void IRBuilder::visit(SyntaxTree::IfStmt &node) {
     this->builder->create_cond_br(tmp_val, trueBB, falseBB);
     this->builder->set_insert_point(trueBB);
     node.if_statement->accept(*this);
+    this->builder->create_br(falseBB);
     this->builder->set_insert_point(falseBB);
     if(node.else_statement!=nullptr){
         node.else_statement->accept(*this);
