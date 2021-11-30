@@ -57,7 +57,7 @@ Type *INT32PTR_T;
 Type *FLOATPTR_T;
 
 //从语法树类型到IR类型的映射
-std::map<SyntaxTree::Type,Type *> type_map;//此处INT32_T还未初始化，不能在此添加映射关系
+std::map<SyntaxTree::Type,Type *> type_map;//此处INT32_T等还未初始化，不能在此添加映射关系
 
 //将from_val转为t类型，主要考虑字面常量转型(字面常量无法load)
 Value *static_cast_value(Value *from_val, Type *t, IRStmtBuilder *builder){
@@ -424,47 +424,40 @@ void IRBuilder::visit(SyntaxTree::ExprStmt &node) {
     node.exp->accept(*this);
 }
 
-//操作数是i32或float
-//非0得0，0得1
+//操作数是i32或float，返回结果是i1
+//not非0得0，0得1；无not非0得1，1得0
+//逻辑表达式不可能出现在全局变量定义中，不做字面常量计算
 void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {
     node.rhs->accept(*this);
     LVal_to_RVal(tmp_val)
 
-#ifdef ENABLE_GLOBAL_LITERAL
-    if(is_literal(tmp_val)){//简单字面量计算
-        int rhs_int;
-        float rhs_float;
-        if(tmp_val->get_type()==INT32_T){
-            rhs_int=dynamic_cast<ConstantInt *>(tmp_val)->get_value();
-        }
-        else{
-            rhs_float=dynamic_cast<ConstantFloat *>(tmp_val)->get_value();
-        }
-
-        if(node.op==SyntaxTree::UnaryCondOp::NOT){
-            if(tmp_val->get_type()==INT32_T){
-                tmp_val=CONST_INT(!rhs_int);
-            }
-            else{
-                tmp_val=CONST_FLOAT(!rhs_float);
-            }
-        }
-        return;
-    }
-#endif
-
     if(node.op==SyntaxTree::UnaryCondOp::NOT){
         if(tmp_val->get_type()==INT32_T){
             tmp_val = builder->create_icmp_eq(tmp_val,CONST_INT(0));
-            tmp_val = builder->create_zext(tmp_val,INT32_T);
+        }
+        else if(tmp_val->get_type()==FLOAT_T){
+            tmp_val = builder->create_fcmp_eq(tmp_val,CONST_FLOAT(0));
         }
         else{
-            tmp_val = builder->create_fcmp_eq(tmp_val,CONST_FLOAT(0));
             tmp_val = builder->create_zext(tmp_val,INT32_T);
+            tmp_val = builder->create_icmp_eq(tmp_val,CONST_INT(0));
+        }
+    }
+    else{
+        if(tmp_val->get_type()==INT32_T){
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
+        }
+        else if(tmp_val->get_type()==FLOAT_T){
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+        }
+        else{
+            tmp_val = builder->create_zext(tmp_val,INT32_T);
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
         }
     }
 }
 
+//逻辑表达式不可能出现在全局变量定义中，不做字面常量计算
 void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
     Value *lval, *rval;
     node.lhs->accept(*this);
