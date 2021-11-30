@@ -6,7 +6,7 @@ IRBuild_ptn = '"{}" "-emit-ir" "-o" "{}" "{}"'
 ExeGen_ptn = '"clang" "{}" "-o" "{}" "{}" "../../lib/lib.c"'
 Exe_ptn = '"{}"'
 
-def eval(EXE_PATH, TEST_BASE_PATH, optimization):
+def test(EXE_PATH, TEST_BASE_PATH, optimization):
     print('===========TEST START===========')
     print('now in {}'.format(TEST_BASE_PATH))
     dir_succ = True
@@ -18,8 +18,10 @@ def eval(EXE_PATH, TEST_BASE_PATH, optimization):
         INPUT_PATH = TEST_BASE_PATH + case + '.in'
         OUTPUT_PATH = TEST_BASE_PATH + case + '.out'
         need_input = testcases[case]
-
-        IRBuild_result = subprocess.run(IRBuild_ptn.format(EXE_PATH, LL_PATH, SY_PATH), shell=True, stderr=subprocess.PIPE)
+        
+        IRBuild_cmd=IRBuild_ptn.format(EXE_PATH, LL_PATH, SY_PATH)
+        # print(IRBuild_cmd)
+        IRBuild_result = subprocess.run(IRBuild_cmd, shell=True, stderr=subprocess.PIPE)
         if IRBuild_result.returncode == 0:
             input_option = None
             if need_input:
@@ -55,10 +57,10 @@ def eval(EXE_PATH, TEST_BASE_PATH, optimization):
                 dir_succ = False
                 print(_, end='')
                 print('\t\033[31mCodeGen or CodeExecute Fail\033[0m')
-            finally:
-                subprocess.call(["rm", "-rf", TEST_PATH, TEST_PATH])
-                subprocess.call(["rm", "-rf", TEST_PATH, TEST_PATH + ".o"])
-                subprocess.call(["rm", "-rf", TEST_PATH, TEST_PATH + ".ll"])
+            #finally:
+            #    subprocess.call(["rm", "-rf", TEST_PATH, TEST_PATH])
+            #    subprocess.call(["rm", "-rf", TEST_PATH, TEST_PATH + ".o"])
+            #    subprocess.call(["rm", "-rf", TEST_PATH, TEST_PATH + ".ll"])
 
         else:
             dir_succ = False
@@ -89,4 +91,4 @@ if __name__ == "__main__":
             testcases[testcase_list[i][0]] = False
         for i in range(len(testcase_list)):
             testcases[testcase_list[i][0]] = testcases[testcase_list[i][0]] | (testcase_list[i][1] == 'in')
-        eval(EXE_PATH, TEST_BASE_PATH, optimization=optimization)
+        test(EXE_PATH, TEST_BASE_PATH, optimization=optimization)
