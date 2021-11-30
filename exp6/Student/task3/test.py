@@ -29,8 +29,10 @@ def test(EXE_PATH, TEST_BASE_PATH, optimization):
                     input_option = fin.read()
 
             try:
-                subprocess.run(ExeGen_ptn.format(optimization, TEST_PATH, LL_PATH), shell=True, stderr=subprocess.PIPE)
-                result = subprocess.run(Exe_ptn.format(TEST_PATH), shell=True, input=input_option, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                ExeGen_cmd=ExeGen_ptn.format(optimization, TEST_PATH, LL_PATH)
+                subprocess.run(ExeGen_cmd, shell=True, stderr=subprocess.PIPE)
+                Exe_cmd=Exe_ptn.format(TEST_PATH)
+                result = subprocess.run(Exe_cmd, shell=True, input=input_option, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 out = result.stdout.split(b'\n')
                 if result.returncode != b'':
                     out.append(str(result.returncode).encode())
@@ -74,6 +76,7 @@ def test(EXE_PATH, TEST_BASE_PATH, optimization):
 
 
 if __name__ == "__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     # you can only modify this to add your testcase
     TEST_DIRS = [
