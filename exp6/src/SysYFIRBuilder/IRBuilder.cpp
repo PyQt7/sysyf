@@ -47,9 +47,9 @@ std::vector<BasicBlock*> tmp_condbb_while;
 std::vector<BasicBlock *> tmp_falsebb_while;
 BasicBlock *tmp_truebb;
 BasicBlock *tmp_falsebb;
-bool break_or_continue;
 std::vector<Value *> init_val;
 Function *init_func = nullptr;
+size_t label_no=0;
 
 // types
 Type *VOID_T;
@@ -181,6 +181,8 @@ void IRBuilder::visit(SyntaxTree::FuncDef &node) {
             builder->create_call(init_func, std::vector<Value *> {});
         }
     }
+
+    label_no=0;//标签序号清零，不同函数的标签同名没有关系
 
     for (auto stmt : node.body->body) {
         stmt->accept(*this);
@@ -415,7 +417,7 @@ void IRBuilder::visit(SyntaxTree::BlockStmt &node) {
     this->scope.enter();
     for(auto stmt : node.body){
         stmt->accept(*this);
-        if(break_or_continue==true){
+        if(dynamic_cast<SyntaxTree::BreakStmt*>(stmt.get())!=nullptr||dynamic_cast<SyntaxTree::ContinueStmt*>(stmt.get())!=nullptr||dynamic_cast<SyntaxTree::ReturnStmt*>(stmt.get())!=nullptr){//break,continue,return后面的语句不再编译
             break;
         }
     }
@@ -468,7 +470,7 @@ void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
         node.lhs->accept(*this);
         lval = tmp_val;
         auto falseBB = tmp_falsebb;
-        auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_lhs", this->builder->get_module()->get_functions().back());
+        auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_lhs_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
         if(lval->get_type()==INT1_T){
             this->builder->create_cond_br(lval, trueBB, falseBB);
         }
@@ -486,7 +488,7 @@ void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
         node.lhs->accept(*this);
         lval = tmp_val;
         LVal_to_RVal(lval);
-        auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_lhs", this->builder->get_module()->get_functions().back());
+        auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_lhs_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
         auto trueBB = tmp_truebb;
         if (lval->get_type() == INT1_T){
             this->builder->create_cond_br(lval, trueBB, falseBB);
@@ -737,11 +739,14 @@ void IRBuilder::visit(SyntaxTree::FuncCallStmt &node) {
         }
         tmp_val=builder->create_call(func,args);//void函数也可以
     }
+    else{
+        std::cout<<"function not defined"<<std::endl;
+    }
 }
 
 void IRBuilder::visit(SyntaxTree::IfStmt &node) {
-    auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_if", this->builder->get_module()->get_functions().back());
-    auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_if", this->builder->get_module()->get_functions().back());
+    auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_if_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
+    auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_if_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
     tmp_truebb = trueBB;
     tmp_falsebb = falseBB;
     node.cond_exp->accept(*this);
@@ -756,9 +761,9 @@ void IRBuilder::visit(SyntaxTree::IfStmt &node) {
 }
 
 void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
-    auto condBB=BasicBlock::create(this->builder->get_module(),"condBB_while",this->builder->get_module()->get_functions().back());
-    auto trueBB=BasicBlock::create(this->builder->get_module(),"trueBB_while",this->builder->get_module()->get_functions().back());
-    auto falseBB=BasicBlock::create(this->builder->get_module(),"falsedBB_while",this->builder->get_module()->get_functions().back());
+    auto condBB=BasicBlock::create(this->builder->get_module(),"condBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
+    auto trueBB=BasicBlock::create(this->builder->get_module(),"trueBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
+    auto falseBB=BasicBlock::create(this->builder->get_module(),"falsedBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
     this->builder->create_br(condBB);
     this->builder->set_insert_point(condBB);
     tmp_truebb = trueBB;
@@ -768,22 +773,20 @@ void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
     this->builder->set_insert_point(trueBB);
     tmp_condbb_while.push_back(condBB);
     tmp_falsebb_while.push_back(falseBB);
-    break_or_continue = false;
+    
     node.statement->accept(*this);
     this->builder->create_br(condBB);
     this->builder->set_insert_point(falseBB);
     tmp_condbb_while.pop_back();
     tmp_falsebb_while.pop_back();
-    break_or_continue = false;
+    
 }
 
 void IRBuilder::visit(SyntaxTree::BreakStmt &node) {
     this->builder->create_br(tmp_falsebb_while.back());
-    break_or_continue = true;
 }
 
 void IRBuilder::visit(SyntaxTree::ContinueStmt &node) {
     this->builder->create_br(tmp_condbb_while.back());
-    break_or_continue = true;
 }
 
