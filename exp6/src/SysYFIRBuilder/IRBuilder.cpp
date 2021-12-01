@@ -32,19 +32,14 @@
 // You can define global variables and functions here
 // to store state
 
+//启用这条宏将把所有 用字面值初始化的常量 出现的地方替换成字面值，常量本身不再出现在.ll文件中
+//注意，用变量值初始化的常量仍应该当成变量，不能当成字面值；常量数组由于可能被变量下标引用，也不能当成字面值
 #define ENABLE_GLOBAL_LITERAL
-
-#ifdef ENABLE_GLOBAL_LITERAL
-//用字面值初始化的全局常量(不含数组)符号表，与scope里定义的符号表不同的是：保存的不是地址而是常量值，用字面值初始化的全局常量不再加入scope的符号表
-//即把 用字面值初始化的全局常量 当成字面值使用，不再出现在.ll文件中
-//注意，用变量值初始化的全局常量应该当成全局变量，不能当成字面值；全局常量数组由于可能被变量下标引用，也不能当成字面值
-std::map<std::string, Constant *> global_literals;
-#endif
 
 // store temporary value
 Value *tmp_val = nullptr;
 
-std::vector<BasicBlock*> tmp_condbb_while;
+std::vector<BasicBlock *> tmp_condbb_while;
 std::vector<BasicBlock *> tmp_falsebb_while;
 std::vector<BasicBlock *> tmp_truebb;
 std::vector<BasicBlock *> tmp_falsebb;
@@ -67,7 +62,7 @@ std::map<SyntaxTree::Type,Type *> type_map;//此处INT32_T等还未初始化，�
 
 //将from_val转为t类型，主要考虑字面常量转型(字面常量无法load)
 Value *static_cast_value(Value *from_val, Type *t, IRStmtBuilder *builder){
-    Value *to_val;
+    auto to_val=from_val;//如果转换失败就保持原类型的值
     // auto literal_ptr=dynamic_cast<Constant *>(from_val);
     auto literal_int_ptr=dynamic_cast<ConstantInt *>(from_val);
     auto literal_float_ptr=dynamic_cast<ConstantFloat *>(from_val);
@@ -114,6 +109,40 @@ void store_to_address(Value *val, Value *addr, IRStmtBuilder *builder){
 //ConstantInt和ConstantFloat实际是"字面值"，不是简单意义上的"常量"
 bool is_literal(Value *val){
     return dynamic_cast<ConstantInt *>(val) || dynamic_cast<ConstantFloat *>(val);
+}
+
+int get_int_value(Value *val){
+    auto literal_int_ptr=dynamic_cast<ConstantInt *>(val);
+    if(literal_int_ptr){
+        return literal_int_ptr->get_value();
+    }
+    else{
+        auto literal_float_ptr=dynamic_cast<ConstantFloat *>(val);
+        if(literal_float_ptr){
+            return static_cast<int>(literal_float_ptr->get_value());
+        }
+        else{
+            std::cout << "cannot cast to int" << std::endl;
+            return 0;
+        }
+    }
+}
+
+float get_float_value(Value *val){
+    auto literal_float_ptr=dynamic_cast<ConstantFloat *>(val);
+    if(literal_float_ptr){
+        return literal_float_ptr->get_value();
+    }
+    else{
+        auto literal_int_ptr=dynamic_cast<ConstantInt *>(val);
+        if(literal_int_ptr){
+            return literal_int_ptr->get_value();
+        }
+        else{
+            std::cout << "cannot cast to float" << std::endl;
+            return 0.0f;
+        }
+    }
 }
 
 //假设已经通过了语法分析和语义检查，测试样例没有错误
@@ -270,7 +299,6 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
     }
 
     Value *new_alloca;
-    // std::cout << node.name << std::endl;
 
     if(scope.in_global()){
         //全局变量(常量)无论有没有初始化，一律全部初始化为0，再调用初始化函数，这是clang++的做法。clang对局部变量也是先全部分配好空间再逐个初始化的。
@@ -301,23 +329,21 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
         else{//不是数组
 
 #ifdef ENABLE_GLOBAL_LITERAL
-            if(node.is_constant){//全局常量不是数组，必有初始化
+            if(node.is_constant){//常量不是数组，必有初始化
                 if(node.initializers){
                     auto literal_init=dynamic_cast<SyntaxTree::Literal *>(node.initializers->expr.get());
-
-                    if(literal_init){//用字面值初始化的全局常量不再加入scope的符号表
+                    if(literal_init){//用字面值初始化的常量直接替换为字面值
                         if(literal_init->literal_type==SyntaxTree::Type::INT){
-                            global_literals[node.name]=CONST_INT(literal_init->int_const);
+                            scope.push(node.name,CONST_INT(literal_init->int_const));
                         }
                         else{
-                            global_literals[node.name]=CONST_FLOAT(literal_init->float_const);
+                            scope.push(node.name,CONST_FLOAT(literal_init->float_const));
                         }
                         return;
                     }
-
                 }
                 else{
-                    std::cout<<"global const without an initialization"<<std::endl;
+                    std::cout<<"const without an initialization"<<std::endl;
                 }
             }
 #endif
@@ -355,6 +381,27 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
 
         }
         else{//不是数组
+
+#ifdef ENABLE_GLOBAL_LITERAL
+            if(node.is_constant){//常量不是数组，必有初始化
+                if(node.initializers){
+                    auto literal_init=dynamic_cast<SyntaxTree::Literal *>(node.initializers->expr.get());
+                    if(literal_init){//用字面值初始化的常量直接替换为字面值
+                        if(literal_init->literal_type==SyntaxTree::Type::INT){
+                            scope.push(node.name,CONST_INT(literal_init->int_const));
+                        }
+                        else{
+                            scope.push(node.name,CONST_FLOAT(literal_init->float_const));
+                        }
+                        return;
+                    }
+                }
+                else{
+                    std::cout<<"const without an initialization"<<std::endl;
+                }
+            }
+#endif
+
             new_alloca = builder->create_alloca(type_map[node.btype]);
             
             if (node.initializers) {//有初始化
@@ -365,55 +412,41 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
         }
     }
 
-    scope.push(node.name,new_alloca);//符号表中保存的全是指针类型(地址)
+    scope.push(node.name,new_alloca);
 
 }
 
-//返回的tmp_val是左值(地址)，用到值时要转为右值(用load指令)
+//scope符号表中保存的全是指针类型(地址)或字面值
+//返回的tmp_val可能是指针或字面值。如果返回的tmp_val是左值(地址、指针)，用到值时要转为右值(用load指令)
 //数组下标必须是整数，不能是浮点数
 void IRBuilder::visit(SyntaxTree::LVal &node) {
-    auto lval=scope.find(node.name,false);//符号表中保存的全是指针类型，lval->get_type()->is_pointer_type()必定是true，但指针指向的类型可以是i32,float,[2 x i32]等
+    auto lval=scope.find(node.name,false);
     if(lval){
-        if(lval->get_type()->is_pointer_type()==false){
-            std::cout << "LVal is not address(pointer type)" << std::endl;
+        if(lval->get_type()->is_pointer_type()){//从符号表中取出的是指针类型
+            if(!node.array_index.empty()){//是a[b]的形式
+                for (auto index : node.array_index) {
+                    index->accept(*this);
+                    //todo ...=tmp_val 用一个vector记录多维数组的下标，现在只实现了一维
+                }
+                LVal_to_RVal(tmp_val)
+                if(lval->get_type()->get_pointer_element_type()->is_array_type()){//指向数组的指针，如[2 x i32]*
+                    tmp_val=builder->create_gep(lval,{CONST_INT(0), tmp_val});
+                }
+                else{//指向i32或float的指针，如i32*, float*
+                    tmp_val=builder->create_gep(lval,{tmp_val});
+                }
+            }
+            else{//是标识符a的形式，没有下标运算符[]
+                tmp_val=lval;
+            }
         }
-
-        if(!node.array_index.empty()){
-            for (auto index : node.array_index) {
-                index->accept(*this);
-                //todo ...=tmp_val 用一个vector记录多维数组的下标，现在只实现了一维
-            }
-            LVal_to_RVal(tmp_val)
-            if(lval->get_type()->get_pointer_element_type()->is_array_type()){//指向数组的指针
-                tmp_val=builder->create_gep(lval,{CONST_INT(0), tmp_val});
-            }
-            else{//指向i32或float的指针
-                tmp_val=builder->create_gep(lval,{tmp_val});
-            }
-        }
-        else{
+        else{//从符号表中取出的是字面值
             tmp_val=lval;
         }
-
     }
-
-    //字面值初始化的全局常量查找放在后面，因为它在最外层作用域
-#ifdef ENABLE_GLOBAL_LITERAL
     else{
-        auto literal_val_iter=global_literals.find(node.name);
-        if(literal_val_iter!=global_literals.end()){
-            tmp_val=literal_val_iter->second;
-            return;
-        }
-        else{
-            std::cout << "LVal not found" << std::endl;
-        }
+        std::cout << "LVal pointer or literal not found" << std::endl;
     }
-#else
-    else{
-        std::cout << "LVal not found" << std::endl;
-    }
-#endif
 
 }
 
@@ -424,7 +457,12 @@ void IRBuilder::visit(SyntaxTree::AssignStmt &node) {
     node.target->accept(*this);
     auto addr=tmp_val;
 
-    store_to_address(val,addr,builder);
+    if(addr->get_type()->is_pointer_type()){//确实是赋值给地址
+        store_to_address(val,addr,builder);
+    }
+    else{//检查源文件的错误
+        std::cout << "assign to non-lvalue expression" << std::endl;
+    }
 }
 
 void IRBuilder::visit(SyntaxTree::Literal &node) {
@@ -472,7 +510,7 @@ void IRBuilder::visit(SyntaxTree::ExprStmt &node) {
 }
 
 //操作数是i32或float，返回结果是i1
-//not非0得0，0得1；单独一个变量或字面值(无not)不会归约到UnaryCondExpr
+//not非0得0，0得1；单独一个标识符或字面值(无not)不会归约到UnaryCondExpr
 //逻辑表达式不可能出现在全局变量定义中，不做字面常量计算
 void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {
     node.rhs->accept(*this);
@@ -690,7 +728,12 @@ void IRBuilder::visit(SyntaxTree::BinaryExpr &node) {
                 }
                 break;
             case SyntaxTree::BinOp::MODULO:
-                tmp_val=CONST_INT(lhs_int%rhs_int);//不检查取模类型
+                if(expr_type==INT32_T){
+                    tmp_val=CONST_INT(lhs_int%rhs_int);
+                }
+                else{
+                    tmp_val=CONST_INT(static_cast<int>(lhs_float)%static_cast<int>(rhs_float));//取模强制转整型
+                }
                 break;
         }
         return;
@@ -711,7 +754,12 @@ void IRBuilder::visit(SyntaxTree::BinaryExpr &node) {
             Binary_op(div,expr_type,lhs_val,rhs_val)
             break;
         case SyntaxTree::BinOp::MODULO:
-            tmp_val=builder->create_isrem(lhs_val,rhs_val);//不检查取模类型
+            if(expr_type==INT32_T){
+                tmp_val=builder->create_isrem(lhs_val,rhs_val);
+            }
+            else{
+                tmp_val=builder->create_isrem(static_cast_value(lhs_val,INT32_T,builder),static_cast_value(rhs_val,INT32_T,builder));//取模强制转整型
+            }
             break;
     }
 
