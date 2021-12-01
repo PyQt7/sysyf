@@ -45,11 +45,11 @@ std::map<std::string, Constant *> global_literals;
 Value *tmp_val = nullptr;
 std::vector<BasicBlock*> tmp_condbb_while;
 std::vector<BasicBlock *> tmp_falsebb_while;
-BasicBlock *tmp_truebb;
-BasicBlock *tmp_falsebb;
-bool break_or_continue;
+std::vector<BasicBlock *> tmp_truebb;
+std::vector<BasicBlock *> tmp_falsebb;
 std::vector<Value *> init_val;
 Function *init_func = nullptr;
+size_t label_no=0;
 
 // types
 Type *VOID_T;
@@ -181,6 +181,8 @@ void IRBuilder::visit(SyntaxTree::FuncDef &node) {
             builder->create_call(init_func, std::vector<Value *> {});
         }
     }
+
+    label_no=0;//标签序号清零，不同函数的标签同名没有关系
 
     for (auto stmt : node.body->body) {
         stmt->accept(*this);
@@ -415,7 +417,7 @@ void IRBuilder::visit(SyntaxTree::BlockStmt &node) {
     this->scope.enter();
     for(auto stmt : node.body){
         stmt->accept(*this);
-        if(break_or_continue==true){
+        if(dynamic_cast<SyntaxTree::BreakStmt*>(stmt.get())!=nullptr||dynamic_cast<SyntaxTree::ContinueStmt*>(stmt.get())!=nullptr||dynamic_cast<SyntaxTree::ReturnStmt*>(stmt.get())!=nullptr){//break,continue,return后面的语句不再编译
             break;
         }
     }
@@ -447,57 +449,50 @@ void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {
             tmp_val = builder->create_icmp_eq(tmp_val,CONST_INT(0));
         }
     }
-    else{
-        if(tmp_val->get_type()==INT32_T){
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
-        }
-        else if(tmp_val->get_type()==FLOAT_T){
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
-        }
-        else{
-            tmp_val = builder->create_zext(tmp_val,INT32_T);
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
-        }
-    }
 }
 
 //逻辑表达式不可能出现在全局变量定义中，不做字面常量计算
 void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
-    Value *lval, *rval, *icmp;
+    Value *lval, *rval;
     if (node.op == SyntaxTree::BinaryCondOp::LAND){
         node.lhs->accept(*this);
         lval = tmp_val;
-        auto falseBB = tmp_falsebb;
-        auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_lhs", this->builder->get_module()->get_functions().back());
-        if(lval->get_type()==INT1_T){
-            this->builder->create_cond_br(lval, trueBB, falseBB);
-        }
-        else{
-            if(lval->get_type()==INT32_T)
-                icmp = this->builder->create_icmp_ne(lval, CONST_INT(0));
-            else
-                icmp = this->builder->create_fcmp_ne(lval, CONST_FLOAT(0));
-            this->builder->create_cond_br(icmp, trueBB, falseBB);
-        }
-        this->builder->set_insert_point(trueBB);
-        node.rhs->accept(*this);
-    }
-    else if(node.op==SyntaxTree::BinaryCondOp::LOR){
-        node.lhs->accept(*this);
-        lval = tmp_val;
-        LVal_to_RVal(lval);
-        auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_lhs", this->builder->get_module()->get_functions().back());
-        auto trueBB = tmp_truebb;
+        LVal_to_RVal(lval)
+        auto falseBB = tmp_falsebb.back();
+        auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_lhs_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
+        tmp_truebb.push_back(trueBB);
         if (lval->get_type() == INT1_T){
             this->builder->create_cond_br(lval, trueBB, falseBB);
         }
         else{
             if(lval->get_type()==INT32_T)
-                icmp = this->builder->create_icmp_ne(lval, CONST_INT(0));
+                tmp_val = this->builder->create_icmp_ne(lval, CONST_INT(0));
             else
-                icmp = this->builder->create_fcmp_ne(lval, CONST_FLOAT(0));
-            this->builder->create_cond_br(icmp, trueBB, falseBB);
+                tmp_val = this->builder->create_fcmp_ne(lval, CONST_FLOAT(0));
+            this->builder->create_cond_br(tmp_val, trueBB, falseBB);
         }
+        tmp_truebb.pop_back();
+        this->builder->set_insert_point(trueBB);
+        node.rhs->accept(*this);
+    }
+    else if(node.op==SyntaxTree::BinaryCondOp::LOR){
+        auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_lhs_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
+        auto trueBB = tmp_truebb.back();
+        tmp_falsebb.push_back(falseBB);
+        node.lhs->accept(*this);
+        lval = tmp_val;
+        LVal_to_RVal(lval);
+        if (lval->get_type() == INT1_T){
+            this->builder->create_cond_br(lval, trueBB, falseBB);
+        }
+        else{
+            if(lval->get_type()==INT32_T)
+                tmp_val = this->builder->create_icmp_ne(lval, CONST_INT(0));
+            else
+                tmp_val = this->builder->create_fcmp_ne(lval, CONST_FLOAT(0));
+            this->builder->create_cond_br(tmp_val, trueBB, falseBB);
+        }
+        tmp_falsebb.pop_back();
         this->builder->set_insert_point(falseBB);
         node.rhs->accept(*this);
     }
@@ -511,33 +506,33 @@ void IRBuilder::visit(SyntaxTree::BinaryCondExpr &node) {
         if (lval->get_type() != INT1_T){
             if (rval->get_type()!=INT1_T){
                 if(lval->get_type()==FLOAT_T&&rval->get_type()==INT32_T){
-                    static_cast_value(rval, FLOAT_T, this->builder);
+                    rval = static_cast_value(rval, FLOAT_T, this->builder);
                 }
                 else if(lval->get_type()==INT32_T&&rval->get_type()==FLOAT_T){
-                    static_cast_value(lval, FLOAT_T, this->builder);
+                    lval = static_cast_value(lval, FLOAT_T, this->builder);
                 }
             }
             else{
                 if(lval->get_type()==INT32_T){
-                    static_cast_value(rval, INT32_T, this->builder);
+                    rval = static_cast_value(rval, INT32_T, this->builder);
                 }
                 else{
-                    static_cast_value(rval, FLOAT_T, this->builder);
+                    rval = static_cast_value(rval, FLOAT_T, this->builder);
                 }
             }
         }
         else{
             if(rval->get_type()!=INT1_T){
                 if(rval->get_type()==INT32_T){
-                    static_cast_value(lval, INT32_T, this->builder);
+                    lval = static_cast_value(lval, INT32_T, this->builder);
                 }
                 else{
-                    static_cast_value(lval, FLOAT_T, this->builder);
+                    lval = static_cast_value(lval, FLOAT_T, this->builder);
                 }
             }
             else{
-                static_cast_value(lval, INT32_T, this->builder);
-                static_cast_value(rval, INT32_T, this->builder);
+                lval = static_cast_value(lval, INT32_T, this->builder);
+                rval = static_cast_value(rval, INT32_T, this->builder);
             }
         }
         if(lval->get_type()==INT32_T){
@@ -737,53 +732,90 @@ void IRBuilder::visit(SyntaxTree::FuncCallStmt &node) {
         }
         tmp_val=builder->create_call(func,args);//void函数也可以
     }
-}
-
-void IRBuilder::visit(SyntaxTree::IfStmt &node) {
-    auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_if", this->builder->get_module()->get_functions().back());
-    auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_if", this->builder->get_module()->get_functions().back());
-    tmp_truebb = trueBB;
-    tmp_falsebb = falseBB;
-    node.cond_exp->accept(*this);
-    this->builder->create_cond_br(tmp_val, trueBB, falseBB);
-    this->builder->set_insert_point(trueBB);
-    node.if_statement->accept(*this);
-    this->builder->create_br(falseBB);
-    this->builder->set_insert_point(falseBB);
-    if(node.else_statement!=nullptr){
-        node.else_statement->accept(*this);
+    else{
+        std::cout<<"function not defined"<<std::endl;
     }
 }
 
+void IRBuilder::visit(SyntaxTree::IfStmt &node) {
+    auto trueBB = BasicBlock::create(this->builder->get_module(), "trueBB_if_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
+    auto nextBB = BasicBlock::create(this->builder->get_module(), "nextBB_if_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
+    if(node.else_statement==nullptr){
+        tmp_truebb.push_back(trueBB);
+        tmp_falsebb.push_back(nextBB);
+        node.cond_exp->accept(*this);
+        LVal_to_RVal(tmp_val)
+        if(tmp_val->get_type()==INT32_T){
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
+        }
+        else if(tmp_val->get_type()==FLOAT_T){
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+        }
+        this->builder->create_cond_br(tmp_val, trueBB, nextBB);
+        this->builder->set_insert_point(trueBB);
+        node.if_statement->accept(*this);
+        this->builder->create_br(nextBB);
+        this->builder->set_insert_point(nextBB);
+    }
+    else{
+        auto falseBB = BasicBlock::create(this->builder->get_module(), "falseBB_if_"+std::to_string(label_no++), this->builder->get_module()->get_functions().back());
+        tmp_truebb.push_back(trueBB);
+        tmp_falsebb.push_back(falseBB);
+        node.cond_exp->accept(*this);
+        LVal_to_RVal(tmp_val)
+        if(tmp_val->get_type()==INT32_T){
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
+        }
+        else if(tmp_val->get_type()==FLOAT_T){
+            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+        }
+        this->builder->create_cond_br(tmp_val, trueBB, falseBB);
+        this->builder->set_insert_point(trueBB);
+        node.if_statement->accept(*this);
+        this->builder->create_br(nextBB);
+        this->builder->set_insert_point(falseBB);
+        node.else_statement->accept(*this);
+        this->builder->create_br(nextBB);
+        this->builder->set_insert_point(nextBB);
+    }
+    tmp_truebb.pop_back();
+    tmp_falsebb.pop_back();
+}
+
 void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
-    auto condBB=BasicBlock::create(this->builder->get_module(),"condBB_while",this->builder->get_module()->get_functions().back());
-    auto trueBB=BasicBlock::create(this->builder->get_module(),"trueBB_while",this->builder->get_module()->get_functions().back());
-    auto falseBB=BasicBlock::create(this->builder->get_module(),"falsedBB_while",this->builder->get_module()->get_functions().back());
+    auto condBB=BasicBlock::create(this->builder->get_module(),"condBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
+    auto trueBB=BasicBlock::create(this->builder->get_module(),"trueBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
+    auto falseBB=BasicBlock::create(this->builder->get_module(),"falseBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
     this->builder->create_br(condBB);
     this->builder->set_insert_point(condBB);
-    tmp_truebb = trueBB;
-    tmp_falsebb = falseBB;
+    tmp_truebb.push_back(trueBB);
+    tmp_falsebb.push_back(falseBB);
     node.cond_exp->accept(*this);
+    LVal_to_RVal(tmp_val)
+    if (tmp_val->get_type() == INT32_T){
+        tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
+    }
+    else if(tmp_val->get_type()==FLOAT_T){
+        tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+    }
     this->builder->create_cond_br(tmp_val, trueBB, falseBB);
     this->builder->set_insert_point(trueBB);
     tmp_condbb_while.push_back(condBB);
     tmp_falsebb_while.push_back(falseBB);
-    break_or_continue = false;
     node.statement->accept(*this);
     this->builder->create_br(condBB);
     this->builder->set_insert_point(falseBB);
     tmp_condbb_while.pop_back();
     tmp_falsebb_while.pop_back();
-    break_or_continue = false;
+    tmp_truebb.pop_back();
+    tmp_falsebb.pop_back();
 }
 
 void IRBuilder::visit(SyntaxTree::BreakStmt &node) {
     this->builder->create_br(tmp_falsebb_while.back());
-    break_or_continue = true;
 }
 
 void IRBuilder::visit(SyntaxTree::ContinueStmt &node) {
     this->builder->create_br(tmp_condbb_while.back());
-    break_or_continue = true;
 }
 
