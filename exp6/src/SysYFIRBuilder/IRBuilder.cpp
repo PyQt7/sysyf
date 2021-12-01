@@ -50,6 +50,7 @@ BasicBlock *tmp_falsebb;
 std::vector<Value *> init_val;
 Function *init_func = nullptr;
 size_t label_no=0;
+bool have_return_stmt=false;
 
 // types
 Type *VOID_T;
@@ -183,6 +184,7 @@ void IRBuilder::visit(SyntaxTree::FuncDef &node) {
     }
 
     label_no=0;//标签序号清零，不同函数的标签同名没有关系
+    have_return_stmt=false;//重置
 
     for (auto stmt : node.body->body) {
         stmt->accept(*this);
@@ -192,6 +194,19 @@ void IRBuilder::visit(SyntaxTree::FuncDef &node) {
     }
     
     scope.exit();
+
+    if(!have_return_stmt){//函数体没有return语句
+        if(node.ret_type==SyntaxTree::Type::VOID){
+            builder->create_void_ret();
+        }
+        else if(node.ret_type==SyntaxTree::Type::INT){
+            builder->create_ret(CONST_INT(0));
+        }
+        else if(node.ret_type==SyntaxTree::Type::FLOAT){
+            builder->create_ret(CONST_FLOAT(0));
+        }
+    }
+
 }
 
 void IRBuilder::visit(SyntaxTree::FuncFParamList &node) {
@@ -249,8 +264,9 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
         if(is_array){
             auto *arrayType = ArrayType::get(type_map[node.btype], array_dim_len.front());//todo front只实现了一维
             
-            auto array_initializer = ConstantArray::get(arrayType, std::vector<Constant *>(arrayType->get_num_of_elements(),ConstantZero::get(type_map[node.btype], builder->get_module())));
-            new_alloca = GlobalVariable::create(node.name, builder->get_module(), arrayType, false, array_initializer);//不用管node.is_constant，直接当成变量，因为经过语义检查器后常量跟变量没有任何区别，事实上clang++也是这样做的
+            // auto zero_initializer = ConstantArray::get(arrayType, std::vector<Constant *>(arrayType->get_num_of_elements(),ConstantZero::get(type_map[node.btype], builder->get_module())));
+            auto zero_initializer = ConstantZero::get(type_map[node.btype], builder->get_module());
+            new_alloca = GlobalVariable::create(node.name, builder->get_module(), arrayType, false, zero_initializer);//不用管node.is_constant，直接当成变量，因为经过语义检查器后常量跟变量没有任何区别，事实上clang++也是这样做的
 
             if (node.initializers) {//有初始化
                 init_val.clear();//先清空
@@ -343,14 +359,6 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
 //返回的tmp_val是左值(地址)，用到值时要转为右值(用load指令)
 //数组下标必须是整数，不能是浮点数
 void IRBuilder::visit(SyntaxTree::LVal &node) {
-#ifdef ENABLE_GLOBAL_LITERAL
-    auto literal_val_iter=global_literals.find(node.name);
-    if(literal_val_iter!=global_literals.end()){
-        tmp_val=literal_val_iter->second;
-        return;
-    }
-#endif
-
     auto lval=scope.find(node.name,false);//符号表中保存的全是指针类型
     if(lval){
         if(lval->get_type()->is_pointer_type()==false){
@@ -370,10 +378,25 @@ void IRBuilder::visit(SyntaxTree::LVal &node) {
         }
 
     }
+
+    //字面值初始化的全局常量查找放在后面，因为它在最外层作用域
+#ifdef ENABLE_GLOBAL_LITERAL
+    else{
+        auto literal_val_iter=global_literals.find(node.name);
+        if(literal_val_iter!=global_literals.end()){
+            tmp_val=literal_val_iter->second;
+            return;
+        }
+        else{
+            std::cout << "LVal not found" << std::endl;
+        }
+    }
+#else
     else{
         std::cout << "LVal not found" << std::endl;
     }
-    
+#endif
+
 }
 
 void IRBuilder::visit(SyntaxTree::AssignStmt &node) {
@@ -396,6 +419,7 @@ void IRBuilder::visit(SyntaxTree::Literal &node) {
 }
 
 void IRBuilder::visit(SyntaxTree::ReturnStmt &node) {
+    have_return_stmt=true;
     if(node.ret!=nullptr){
         node.ret->accept(*this);
         LVal_to_RVal(tmp_val)
@@ -431,7 +455,7 @@ void IRBuilder::visit(SyntaxTree::ExprStmt &node) {
 }
 
 //操作数是i32或float，返回结果是i1
-//not非0得0，0得1；无not非0得1，1得0
+//not非0得0，0得1；单独一个变量或字面值(无not)不会归约到UnaryCondExpr
 //逻辑表达式不可能出现在全局变量定义中，不做字面常量计算
 void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {
     node.rhs->accept(*this);
@@ -449,18 +473,7 @@ void IRBuilder::visit(SyntaxTree::UnaryCondExpr &node) {
             tmp_val = builder->create_icmp_eq(tmp_val,CONST_INT(0));
         }
     }
-    else{
-        if(tmp_val->get_type()==INT32_T){
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
-        }
-        else if(tmp_val->get_type()==FLOAT_T){
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
-        }
-        else{
-            tmp_val = builder->create_zext(tmp_val,INT32_T);
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
-        }
-    }
+
 }
 
 //逻辑表达式不可能出现在全局变量定义中，不做字面常量计算

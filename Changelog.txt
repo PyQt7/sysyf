@@ -30,6 +30,12 @@ exp6
 9。目前20个测试样例全部通过
 10。修复之前pull request对于BlockStmt跳过编译的bug，如while(1){if(1)break; int a=1;}，错误地把break后面的跳过了
 11。修复同一函数内跳转标签同名问题
+12。修复函数没有return语句时未创建ret指令的问题
+
+20211201
+1。修复全局字面值查找的作用域顺序问题
+2。修复测试脚本去除行尾\r,\n字符的问题
+3。删除UnaryCondExpr中多余的语句，单独的LVal直接归约成AddExpr再归约成Expr，不会经过UnaryCondExpr
 
 
 
