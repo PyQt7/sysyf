@@ -44,7 +44,7 @@ def test(EXE_PATH, TEST_BASE_PATH, optimization):
                 with open(OUTPUT_PATH, "rb") as fout:
                     i = 0
                     for line in fout.readlines():
-                        line = line.strip(b'\r').strip(b'\n')
+                        line = line.strip(b'\n').strip(b'\r').strip(b'\n')
                         if line == '':
                             continue
                         if out[i] != line:
