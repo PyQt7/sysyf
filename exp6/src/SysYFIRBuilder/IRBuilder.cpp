@@ -166,7 +166,13 @@ void IRBuilder::visit(SyntaxTree::InitVal &node) {
 void IRBuilder::visit(SyntaxTree::FuncDef &node) {
     std::vector<Type *> params{};
     for(auto param:node.param_list->params){
-        params.push_back(type_map[param->param_type]);
+        auto arg_elem_type=type_map[param->param_type];
+        if(param->array_index.empty()){
+            params.push_back(arg_elem_type);
+        }
+        else{
+            params.push_back(PointerType::get(arg_elem_type));
+        }
     }
     auto funTy = FunctionType::get(type_map[node.ret_type], params);
     auto fun = Function::create(funTy, node.name, builder->get_module());
@@ -217,11 +223,15 @@ void IRBuilder::visit(SyntaxTree::FuncFParamList &node) {
     for(auto param:node.params){
         param->accept(*this);
         
-        // 参数通过寄存器传递，要再分配空间并store
-        auto paramAlloc=builder->create_alloca(type_map[param->param_type]);
-        builder->create_store((*func_args_iter),paramAlloc);
-
-        scope.push(param->name,paramAlloc);
+        //参数通过寄存器传递
+        if((*func_args_iter)->get_type()->is_pointer_type()){//传递指针
+            scope.push(param->name,(*func_args_iter));
+        }
+        else{//传值，要再分配空间并store
+            auto paramAlloc=builder->create_alloca(type_map[param->param_type]);
+            builder->create_store((*func_args_iter),paramAlloc);
+            scope.push(param->name,paramAlloc);
+        }
 
         func_args_iter++;
     }
@@ -362,7 +372,7 @@ void IRBuilder::visit(SyntaxTree::VarDef &node) {
 //返回的tmp_val是左值(地址)，用到值时要转为右值(用load指令)
 //数组下标必须是整数，不能是浮点数
 void IRBuilder::visit(SyntaxTree::LVal &node) {
-    auto lval=scope.find(node.name,false);//符号表中保存的全是指针类型
+    auto lval=scope.find(node.name,false);//符号表中保存的全是指针类型，lval->get_type()->is_pointer_type()必定是true，但指针指向的类型可以是i32,float,[2 x i32]等
     if(lval){
         if(lval->get_type()->is_pointer_type()==false){
             std::cout << "LVal is not address(pointer type)" << std::endl;
@@ -374,7 +384,12 @@ void IRBuilder::visit(SyntaxTree::LVal &node) {
                 //todo ...=tmp_val 用一个vector记录多维数组的下标，现在只实现了一维
             }
             LVal_to_RVal(tmp_val)
-            tmp_val=builder->create_gep(lval,{CONST_INT(0), tmp_val});
+            if(lval->get_type()->get_pointer_element_type()->is_array_type()){//指向数组的指针
+                tmp_val=builder->create_gep(lval,{CONST_INT(0), tmp_val});
+            }
+            else{//指向i32或float的指针
+                tmp_val=builder->create_gep(lval,{tmp_val});
+            }
         }
         else{
             tmp_val=lval;
@@ -746,14 +761,28 @@ void IRBuilder::visit(SyntaxTree::FuncCallStmt &node) {
         auto func_args_iter=dynamic_cast<Function *>(func)->arg_begin();
         for(auto exp:node.params){
             exp->accept(*this);
-            LVal_to_RVal(tmp_val)
-            //函数调用参数转型
-            if(tmp_val->get_type()==INT32_T && (*func_args_iter)->get_type()==FLOAT_T){
-                tmp_val=static_cast_value(tmp_val,FLOAT_T,builder);
+
+            auto arg_type=(*func_args_iter)->get_type();
+            if(!(arg_type==INT32PTR_T || arg_type==FLOATPTR_T)){//参数不是指针
+                LVal_to_RVal(tmp_val)
+                //函数调用参数转型
+                if(tmp_val->get_type()==INT32_T && arg_type==FLOAT_T){
+                    tmp_val=static_cast_value(tmp_val,FLOAT_T,builder);
+                }
+                else if(tmp_val->get_type()==FLOAT_T && arg_type==INT32_T){
+                    tmp_val=static_cast_value(tmp_val,INT32_T,builder);
+                }
             }
-            else if(tmp_val->get_type()==FLOAT_T && (*func_args_iter)->get_type()==INT32_T){
-                tmp_val=static_cast_value(tmp_val,INT32_T,builder);
+            else{
+                auto actual_arg_type=tmp_val->get_type();
+                if(actual_arg_type->get_pointer_element_type()->is_array_type()){//实参是指向数组的指针
+                    tmp_val=builder->create_gep(tmp_val,{CONST_INT(0),CONST_INT(0)});
+                }
+                // else{//实参是指向i32或float的指针
+                // 
+                // }
             }
+            
             args.push_back(tmp_val);
             func_args_iter++;
         }
@@ -813,7 +842,7 @@ void IRBuilder::visit(SyntaxTree::IfStmt &node) {
 void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
     auto condBB=BasicBlock::create(this->builder->get_module(),"condBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
     auto trueBB=BasicBlock::create(this->builder->get_module(),"trueBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
-    auto falseBB=BasicBlock::create(this->builder->get_module(),"falsedBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
+    auto falseBB=BasicBlock::create(this->builder->get_module(),"falseBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
     this->builder->create_br(condBB);
     this->builder->set_insert_point(condBB);
     tmp_truebb.push_back(trueBB);
