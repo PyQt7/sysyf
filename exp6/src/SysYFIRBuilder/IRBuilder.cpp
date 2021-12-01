@@ -776,7 +776,7 @@ void IRBuilder::visit(SyntaxTree::IfStmt &node) {
             tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
         }
         else if(tmp_val->get_type()==FLOAT_T){
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+            tmp_val = builder->create_fcmp_ne(tmp_val,CONST_FLOAT(0));
         }
         this->builder->create_cond_br(tmp_val, trueBB, nextBB);
         this->builder->set_insert_point(trueBB);
