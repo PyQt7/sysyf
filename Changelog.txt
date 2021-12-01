@@ -37,5 +37,7 @@ exp6
 2。修复测试脚本去除行尾\r,\n字符的问题
 3。删除UnaryCondExpr中多余的语句，单独的LVal直接归约成AddExpr再归约成Expr，不会经过UnaryCondExpr
 4。修复if,while的条件表达式的转型，多个与或逻辑表达式的短路计算等问题
+5。修复函数嵌套语句块中有return语句的问题
+6。修复之前pull request中的语法错误和笔误(fcmp写成了icmp)
 
 

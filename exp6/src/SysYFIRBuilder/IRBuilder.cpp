@@ -52,7 +52,6 @@ std::vector<BasicBlock *> tmp_falsebb;
 std::vector<Value *> init_val;
 Function *init_func = nullptr;
 size_t label_no=0;
-bool have_return_stmt=false;
 
 
 // types
@@ -187,18 +186,19 @@ void IRBuilder::visit(SyntaxTree::FuncDef &node) {
     }
 
     label_no=0;//标签序号清零，不同函数的标签同名没有关系
-    have_return_stmt=false;//重置
+    bool have_return_stmt=false;//函数体所在的语句块(不含嵌套语句块)是否有return语句
 
     for (auto stmt : node.body->body) {
         stmt->accept(*this);
         if(dynamic_cast<SyntaxTree::ReturnStmt*>(stmt.get())!=nullptr){//return后面的语句不再编译
+            have_return_stmt=true;//(不含嵌套语句块)有return
             break;
         }
     }
     
     scope.exit();
 
-    if(!have_return_stmt){//函数体没有return语句
+    if(!have_return_stmt){//(不含嵌套语句块)没有return语句
         if(node.ret_type==SyntaxTree::Type::VOID){
             builder->create_void_ret();
         }
@@ -422,7 +422,6 @@ void IRBuilder::visit(SyntaxTree::Literal &node) {
 }
 
 void IRBuilder::visit(SyntaxTree::ReturnStmt &node) {
-    have_return_stmt=true;
     if(node.ret!=nullptr){
         node.ret->accept(*this);
         LVal_to_RVal(tmp_val)
@@ -795,7 +794,7 @@ void IRBuilder::visit(SyntaxTree::IfStmt &node) {
             tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
         }
         else if(tmp_val->get_type()==FLOAT_T){
-            tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+            tmp_val = builder->create_fcmp_ne(tmp_val,CONST_FLOAT(0));
         }
         this->builder->create_cond_br(tmp_val, trueBB, falseBB);
         this->builder->set_insert_point(trueBB);
@@ -817,8 +816,8 @@ void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
     auto falseBB=BasicBlock::create(this->builder->get_module(),"falsedBB_while_"+std::to_string(label_no++),this->builder->get_module()->get_functions().back());
     this->builder->create_br(condBB);
     this->builder->set_insert_point(condBB);
-    tmp_truebb = trueBB;
-    tmp_falsebb = falseBB;
+    tmp_truebb.push_back(trueBB);
+    tmp_falsebb.push_back(falseBB);
 
     node.cond_exp->accept(*this);
     LVal_to_RVal(tmp_val)
@@ -826,7 +825,7 @@ void IRBuilder::visit(SyntaxTree::WhileStmt &node) {
         tmp_val = builder->create_icmp_ne(tmp_val,CONST_INT(0));
     }
     else if(tmp_val->get_type()==FLOAT_T){
-        tmp_val = builder->create_icmp_ne(tmp_val,CONST_FLOAT(0));
+        tmp_val = builder->create_fcmp_ne(tmp_val,CONST_FLOAT(0));
     }
     this->builder->create_cond_br(tmp_val, trueBB, falseBB);
     this->builder->set_insert_point(trueBB);
