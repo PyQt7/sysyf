@@ -74,9 +74,64 @@ while(i<n+1){
 
 ## 实验设计
 
+第一关意义在于熟悉llvm语言语法；第二关意义在于，对一特定.c文件，用cpp语言构造出c语言到llvm语言的映射；第三关意义在于，用cpp语言编写出一个将AST语法树映射为llvm的自动编译器。
+由于第一关，第二关难度较低，在此不予讨论。仅讨论第三关的设计思路。
+
+
+默认测试样例没有错误，已经通过了语法分析和语义检查。该实验目标即为将.c文件形成的AST语法树映射成为llvm语言的.ll文件。即对AST树中每个结点，编写相应的映射规则。
+
+先考虑普通语句：
+
+1. BlockStmt：在一个scope中操作；
+2. EmptyStmt：无操作；
+3. ExprStmt：访问该表达式；
+
+考虑表达式：
+
+1. UnaryCondExpr：处理非的情况，具体放在难点中讨论；
+2. BinaryCondExpr：分为&&与||进行讨论。亮点短路计算的实现在难点中讨论；
+3. BinaryExpr：//to do 
+
+再考虑控制流语句：
+控制流语句主要是进行BasicBlock的跳转。考虑到有嵌套情况，所以定义了四个容器，用于储存每种情况下的分支；
+
+```c++
+std::vector<BasicBlock *> tmp_condbb_while;
+std::vector<BasicBlock *> tmp_falsebb_while;
+std::vector<BasicBlock *> tmp_truebb;
+std::vector<BasicBlock *> tmp_falsebb;
+```
+
+1. if语句：
+
+   1. 若没有else语句，则整个语句即可分为true 部分 (if(true)) 与next部分。先将创造出的true压入相应容器。
+      进入判断条件语句：判断条件表达式是否大于与其类型相同的常数0；若大于，则跳转到true 部分。
+      之后，运行到next部分；
+   2. 若有else语句，则添加false 部分 (if(false))。将创造出的false 部分压入相应容器。进入判断条件语句：判断条件表达式是否大于与其类型相同的常数0；若大于，则跳转到true 部分；小于，则跳转的false 部分。
+      之后，运行到next 部分；
+
+   结束后，弹出相应容器中的值。
+
+2. while语句：
+
+   创造cond，true，false三个部分，压入相应容器，与if相同，判断条件表达式是否大于与其类型相同的常数0，后跳转到相应部分，true结束后跳转到cond。
+
+   结束后，弹出相应容器中的值。
+
+3. break语句：
+
+   跳转到while false部分。
+
+4. continue语句：
+
+   跳转到while cond部分。
+
+再考虑
+
 ## 实验难点及解决方案
 
 1. 左值、右值转换
+
 2. 短路计算
 
 ## 实验总结
